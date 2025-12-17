@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Leap Orbit - 躲避刺球</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #333; /*深色背景突出白球和黑球*/
+            font-family: 'Arial', sans-serif;
+            touch-action: none; /* 禁止手机上的默认触摸行为 */
+        }
+        canvas {
+            display: block;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            pointer-events: none; /* 让点击穿透到Canvas */
+            color: white;
+            z-index: 10;
+        }
+        #score {
+            font-size: 80px;
+            font-weight: bold;
+            opacity: 0.3;
+        }
+        #start-msg {
+            font-size: 20px;
+            margin-top: 10px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui-layer">
+    <div id="score">0</div>
+    <div id="start-msg">长按屏幕开始 / 跳跃</div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const msgEl = document.getElementById('start-msg');
+
+    // 游戏配置
+    let width, height, centerX, centerY;
+    let frameId;
+    let score = 0;
+    let isGameOver = true;
+    let isPressing = false; // 是否正在长按
+
+    // 玩家配置
+    const player = {
+        angle: 0,
+        radius: 60,       // 当前距离中心的距离
+        baseRadius: 60,   // 内圈半径
+        leapRadius: 180,  // 外圈半径
+        speed: 0.05,      // 旋转速度
+        size: 12,
+        color: '#00d2ff',
+        x: 0,
+        y: 0,
+        trail: []         // 拖尾数组
+    };
+
+    // 实体数组
+    let targets = []; // 白球
+    let enemies = []; // 黑球
+    let particles = []; // 粒子特效
+
+    // 初始化画布尺寸
+    function resize() {
+        width = window.innerWidth;
+        height = window.innerHeight;
+        canvas.width = width;
+        canvas.height = height;
+        centerX = width / 2;
+        centerY = height / 2;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // 输入监听
+    function handleStart(e) {
+        // e.preventDefault(); // 防止手机滚动
+        isPressing = true;
+        if (isGameOver) restartGame();
+    }
+
+    function handleEnd(e) {
+        // e.preventDefault();
+        isPressing = false;
+    }
+
+    // 鼠标和触摸事件
+    window.addEventListener('mousedown', handleStart);
+    window.addEventListener('mouseup', handleEnd);
+    window.addEventListener('touchstart', handleStart, {passive: false});
+    window.addEventListener('touchend', handleEnd, {passive: false});
+
+    // 随机函数
+    function randomRange(min, max) {
+        return Math.random() * (max - min) + min;
+    }
+
+    // 粒子类 (爆炸特效)
+    class Particle {
+        constructor(x, y, color) {
+            this.x = x;
+            this.y = y;
+            this.color = color;
+            this.vx = (Math.random() - 0.5) * 10;
+            this.vy = (Math.random() - 0.5) * 10;
+            this.life = 1.0; // 生命值 1.0 -> 0
+            this.decay = 0.03;
+        }
+        update() {
+            this.x += this.vx;
+            this.y += this.vy;
+            this.life -= this.decay;
+        }
+        draw(ctx) {
+            ctx.globalAlpha = this.life;
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1.0;
+        }
+    }
+
+    // 目标类 (白球)
+    class Target {
+        constructor() {
+            this.angle = randomRange(0, Math.PI * 2);
+            // 生成在内外圈之间，稍微偏外
+            this.dist = randomRange(player.baseRadius + 50, player.leapRadius + 20);
+            this.size = 10;
+            this.active = true;
+        }
+        draw(ctx) {
+            if(!this.active) return;
+            const x = centerX + Math.cos(this.angle) * this.dist;
+            const y = centerY + Math.sin(this.angle) * this.dist;
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(x, y, this.size, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 发光效果
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = "white";
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+    }
+
+    // 敌人类 (黑色刺球)
+    class Enemy {
+        constructor() {
+            this.angle = randomRange(0, Math.PI * 2);
+            // 必须生成在玩家跳跃路径附近
+            this.dist = randomRange(player.baseRadius + 40, player.leapRadius + 10);
+            this.size = 15;
+            this.rotation = 0; // 自转
+            this.speed = randomRange(-0.01, 0.01); // 缓慢公转
+        }
+        update() {
+            this.angle += this.speed;
+            this.rotation += 0.05;
+        }
+        draw(ctx) {
+            const x = centerX + Math.cos(this.angle) * this.dist;
+            const y = centerY + Math.sin(this.angle) * this.dist;
+
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(this.rotation);
+            
+            ctx.fillStyle = '#000000';
+            ctx.beginPath();
+            // 绘制刺球形状
+            const spikes = 8;
+            const outerRadius = this.size;
+            const innerRadius = this.size / 2;
+            for(let i=0; i<spikes; i++) {
+                let rot = Math.PI / 2 * 3;
+                let x = 0;
+                let y = 0;
+                let step = Math.PI / spikes;
+
+                ctx.lineTo(Math.cos(rot + i*step*2) * outerRadius, Math.sin(rot + i*step*2) * outerRadius);
+                ctx.lineTo(Math.cos(rot + i*step*2 + step) * innerRadius, Math.sin(rot + i*step*2 + step) * innerRadius);
+            }
+            ctx.closePath();
+            ctx.fill();
+            
+            // 红色描边看起来更危险
+            ctx.strokeStyle = '#ff3333';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            ctx.restore();
+            return {x, y}; // 返回坐标用于碰撞检测
+        }
+    }
+
+    function spawnEntities() {
+        // 维持一定数量的白球
+        if (targets.length < 3 && Math.random() < 0.05) {
+            targets.push(new Target());
+        }
+        // 维持一定数量的黑球，随着分数增加变多
+        let maxEnemies = 3 + Math.floor(score / 5);
+        if (enemies.length < maxEnemies && Math.random() < 0.02) {
+            enemies.push(new Enemy());
+        }
+    }
+
+    function checkCollision(x1, y1, r1, x2, y2, r2) {
+        const dx = x1 - x2;
+        const dy = y1 - y2;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        return distance < r1 + r2;
+    }
+
+    function restartGame() {
+        score = 0;
+        isGameOver = false;
+        player.angle = 0;
+        player.radius = player.baseRadius;
+        targets = [];
+        enemies = [];
+        particles = [];
+        scoreEl.innerText = score;
+        msgEl.style.display = 'none';
+        loop();
+    }
+
+    function createExplosion(x, y, color) {
+        for(let i=0; i<10; i++) {
+            particles.push(new Particle(x, y, color));
+        }
+    }
+
+    function gameOver() {
+        isGameOver = true;
+        msgEl.style.display = 'block';
+        msgEl.innerText = "Game Over - 点击重试";
+        cancelAnimationFrame(frameId);
+        
+        // 死亡特效
+        createExplosion(player.x, player.y, 'red');
+        // 画最后一帧以显示粒子
+        draw();
+    }
+
+    function update() {
+        if (isGameOver) return;
+
+        // 1. 玩家运动逻辑
+        player.angle += player.speed;
+        
+        // 长按向外，松开向内 (平滑插值)
+        let targetRadius = isPressing ? player.leapRadius : player.baseRadius;
+        player.radius += (targetRadius - player.radius) * 0.1;
+
+        // 计算玩家笛卡尔坐标
+        player.x = centerX + Math.cos(player.angle) * player.radius;
+        player.y = centerY + Math.sin(player.angle) * player.radius;
+
+        // 记录拖尾
+        player.trail.push({x: player.x, y: player.y});
+        if (player.trail.length > 20) player.trail.shift();
+
+        // 2. 生成物体
+        spawnEntities();
+
+        // 3. 更新并检测碰撞：敌人 (黑球)
+        for (let i = enemies.length - 1; i >= 0; i--) {
+            let e = enemies[i];
+            e.update();
+            let pos = {
+                x: centerX + Math.cos(e.angle) * e.dist,
+                y: centerY + Math.sin(e.angle) * e.dist
+            };
+
+            // 如果太远或太久可以移除（这里简化为一直存在直到超出视野或重置）
+            // 简单的碰撞检测
+            if (checkCollision(player.x, player.y, player.size, pos.x, pos.y, e.size)) {
+                gameOver();
+                return;
+            }
+        }
+
+        // 4. 更新并检测碰撞：目标 (白球)
+        for (let i = targets.length - 1; i >= 0; i--) {
+            let t = targets[i];
+            let tX = centerX + Math.cos(t.angle) * t.dist;
+            let tY = centerY + Math.sin(t.angle) * t.dist;
+
+            if (checkCollision(player.x, player.y, player.size, tX, tY, t.size)) {
+                score++;
+                scoreEl.innerText = score;
+                createExplosion(tX, tY, 'white');
+                targets.splice(i, 1); // 移除被吃掉的球
+            }
+        }
+
+        // 5. 更新粒子
+        for (let i = particles.length - 1; i >= 0; i--) {
+            particles[i].update();
+            if (particles[i].life <= 0) particles.splice(i, 1);
+        }
+    }
+
+    function draw() {
+        // 清空背景
+        ctx.fillStyle = '#222'; 
+        ctx.fillRect(0, 0, width, height);
+
+        // 绘制中心支点
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, 20, 0, Math.PI * 2);
+        ctx.fillStyle = '#444';
+        ctx.fill();
+        ctx.strokeStyle = '#555';
+        ctx.stroke();
+
+        if (isGameOver && particles.length > 0) {
+             // 仅绘制粒子
+             particles.forEach(p => p.draw(ctx));
+             return;
+        }
+
+        // 绘制连接线 (绳子)
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY);
+        ctx.lineTo(player.x, player.y);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // 绘制玩家拖尾
+        if (player.trail.length > 1) {
+            ctx.beginPath();
+            ctx.moveTo(player.trail[0].x, player.trail[0].y);
+            for (let i = 1; i < player.trail.length; i++) {
+                ctx.lineTo(player.trail[i].x, player.trail[i].y);
+            }
+            ctx.strokeStyle = player.color;
+            ctx.lineWidth = player.size;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+        }
+
+        // 绘制玩家
+        ctx.beginPath();
+        ctx.arc(player.x, player.y, player.size, 0, Math.PI * 2);
+        ctx.fillStyle = player.color;
+        ctx.fill();
+
+        // 绘制白球
+        targets.forEach(t => t.draw(ctx));
+
+        // 绘制黑球
+        enemies.forEach(e => e.draw(ctx));
+
+        // 绘制粒子
+        particles.forEach(p => p.draw(ctx));
+    }
+
+    function loop() {
+        update();
+        draw();
+        if (!isGameOver) {
+            frameId = requestAnimationFrame(loop);
+        }
+    }
+
+    // 初始画面
+    draw();
+
+</script>
+</body>
+</html>
