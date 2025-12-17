@@ -30,17 +30,18 @@
             font-weight: bold;
             opacity: 0.3;
             text-shadow: 0 0 10px rgba(255,255,255,0.5);
-            transition: transform 0.1s;
         }
         #start-msg {
             font-size: 18px;
             margin-top: 10px;
             text-transform: uppercase;
             letter-spacing: 2px;
-            background: rgba(0,0,0,0.5);
+            background: rgba(0,0,0,0.6);
             padding: 10px 20px;
             border-radius: 20px;
+            backdrop-filter: blur(5px);
         }
+        /* 道具状态栏 */
         #buff-bar {
             position: absolute;
             top: 20px;
@@ -81,7 +82,7 @@
 
 <div id="ui-layer">
     <div id="score">0</div>
-    <div id="start-msg">长按跳跃 / 体验惯性<br><span style="font-size:12px; color:#aaa">🟢护盾 🟣磁铁 ⚪得分</span></div>
+    <div id="start-msg">长按甩出 / 松手滑行<br><span style="font-size:12px; color:#aaa">体验惯性物理引擎</span></div>
 </div>
 
 <canvas id="gameCanvas"></canvas>
@@ -91,6 +92,7 @@
     const ctx = canvas.getContext('2d');
     const scoreEl = document.getElementById('score');
     const msgEl = document.getElementById('start-msg');
+    
     const buffShieldEl = document.getElementById('buff-shield');
     const buffMagnetEl = document.getElementById('buff-magnet');
 
@@ -100,21 +102,14 @@
     let isGameOver = true;
     let isPressing = false;
 
-    // 玩家配置 (核心修改区域)
+    // 玩家配置 (物理参数核心)
     const player = {
         angle: 0,
         radius: 60,       
+        radialVelocity: 0, // 新增：径向速度
         baseRadius: 60,   
-        
-        // --- 物理参数调整 ---
-        leapLimit: 260,   // 最大跳跃软上限
-        rVelocity: 0,     // 径向速度 (新增)
-        accelOut: 1.2,    // 向外的推力加速度 (长按时)
-        gravity: 0.5,     // 向内的重力加速度 (松手时)
-        drag: 0.94,       // 空气阻力 (0.9-0.99，越大越滑，越小越粘滞)
-        // ------------------
-
-        rotSpeed: 0.035,
+        leapRadius: 260,   // 稍微再加大一点，配合惯性会很爽
+        speed: 0.03,       // 旋转速度
         size: 14,
         color: '#00d2ff',
         x: 0,
@@ -124,9 +119,16 @@
         magnetTime: 0
     };
 
+    // 物理参数调优 (手感关键)
+    const PHYSICS = {
+        springStrength: 0.005, // 弹簧硬度：越小越软，惯性越大
+        drag: 0.92,            // 空气阻力：0.9-0.99之间，越大滑行越远
+        pressForce: 1.2,       // 按下时的推力
+        gravity: 0.8           // 松开时的拉力
+    };
+
     let entities = []; 
     let particles = []; 
-    let shake = 0; // 屏幕震动值
 
     function resize() {
         width = window.innerWidth;
@@ -141,6 +143,7 @@
 
     function handleStart(e) { isPressing = true; if (isGameOver) restartGame(); }
     function handleEnd(e) { isPressing = false; }
+    
     window.addEventListener('mousedown', handleStart);
     window.addEventListener('mouseup', handleEnd);
     window.addEventListener('touchstart', handleStart, {passive: false});
@@ -152,8 +155,8 @@
         constructor(type) {
             this.type = type; 
             this.angle = randomRange(0, Math.PI * 2);
-            // 生成高度稍微随机一点，但大部分在中高空
-            this.dist = randomRange(player.baseRadius + 60, player.leapLimit - 20);
+            // 生成位置稍微分散一点
+            this.dist = randomRange(player.baseRadius + 60, player.leapRadius + 30);
             this.active = true;
             this.scale = 0;
             this.maxScale = 1;
@@ -165,7 +168,7 @@
                 this.size = 16;
                 this.color = '#000000';
                 this.rotation = 0;
-                this.moveSpeed = randomRange(-0.005, 0.005);
+                this.moveSpeed = randomRange(-0.003, 0.003); 
             } else if (type === 'shield') {
                 this.size = 14;
                 this.color = '#00ff00';
@@ -176,26 +179,34 @@
         }
 
         update() {
-            if (this.scale < this.maxScale) this.scale += 0.1;
+            if (this.scale < this.maxScale) this.scale += 0.05; // 出现动画变慢
+            
             if (this.type === 'enemy') {
                 this.angle += this.moveSpeed;
                 this.rotation += 0.05;
             }
-            // 磁铁逻辑
+
             if (this.type === 'score' && player.magnetTime > 0) {
-                let dx = player.x - (centerX + Math.cos(this.angle) * this.dist);
-                let dy = player.y - (centerY + Math.sin(this.angle) * this.dist);
-                if ((dx*dx + dy*dy) < 40000) { 
-                    // 平滑飞向玩家
+                let px = player.x;
+                let py = player.y;
+                let tx = centerX + Math.cos(this.angle) * this.dist;
+                let ty = centerY + Math.sin(this.angle) * this.dist;
+                
+                let dx = px - tx;
+                let dy = py - ty;
+                let distToPlayer = Math.sqrt(dx*dx + dy*dy);
+
+                if (distToPlayer < 250) { 
+                    // 磁吸效果优化：平滑飞向玩家
                     this.dist += (player.radius - this.dist) * 0.15;
-                    // 简单的角度逼近
-                    let diffAngle = player.angle - this.angle;
-                    // 处理角度环绕问题 (-PI to PI)
-                    while (diffAngle > Math.PI) diffAngle -= Math.PI * 2;
-                    while (diffAngle < -Math.PI) diffAngle += Math.PI * 2;
-                    this.angle += diffAngle * 0.1;
-                    
-                    if((dx*dx + dy*dy) < 2500) return true; 
+                    // 角度慢慢修正向玩家
+                    let angleDiff = player.angle - this.angle;
+                    // 处理角度回环 (0 -> 2PI)
+                    while(angleDiff > Math.PI) angleDiff -= Math.PI*2;
+                    while(angleDiff < -Math.PI) angleDiff += Math.PI*2;
+                    this.angle += angleDiff * 0.1;
+
+                    if(distToPlayer < 50) return true; 
                 }
             }
             return false;
@@ -229,9 +240,12 @@
                 ctx.beginPath();
                 ctx.arc(0, 0, s, 0, Math.PI * 2);
                 ctx.fill();
+                
                 if (this.type !== 'score') {
                     ctx.strokeStyle = 'white';
                     ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, s + 4, 0, Math.PI * 2);
                     ctx.stroke();
                 } else {
                     ctx.shadowBlur = 10;
@@ -242,6 +256,7 @@
             }
             ctx.restore();
         }
+        
         getPos() {
             return {
                 x: centerX + Math.cos(this.angle) * this.dist,
@@ -262,7 +277,7 @@
         update() {
             this.x += this.vx;
             this.y += this.vy;
-            this.life -= 0.04;
+            this.life -= 0.03;
         }
         draw(ctx) {
             ctx.globalAlpha = Math.max(0, this.life);
@@ -275,17 +290,18 @@
     }
 
     function spawnEntity() {
-        if (entities.length > 15) return;
+        if (entities.length > 18) return; 
+
         let r = Math.random();
-        // 降低黑球生成概率，提高道具概率
-        if (r < 0.012) entities.push(new Entity('shield')); 
-        else if (r < 0.024) entities.push(new Entity('magnet')); 
-        else if (r < 0.06) {
+        // 降低黑球生成频率，增加游戏流畅度
+        if (r < 0.005) entities.push(new Entity('shield')); 
+        else if (r < 0.01) entities.push(new Entity('magnet')); 
+        else if (r < 0.03) {
              let enemyCount = entities.filter(e => e.type === 'enemy').length;
              let maxEnemies = 2 + Math.floor(score / 10); 
              if (enemyCount < maxEnemies) entities.push(new Entity('enemy'));
         }
-        else if (r < 0.12) entities.push(new Entity('score'));
+        else if (r < 0.08) entities.push(new Entity('score')); 
     }
 
     function checkCollision(x1, y1, r1, x2, y2, r2) {
@@ -295,7 +311,7 @@
     }
 
     function createExplosion(x, y, color) {
-        for(let i=0; i<12; i++) particles.push(new Particle(x, y, color));
+        for(let i=0; i<15; i++) particles.push(new Particle(x, y, color));
     }
 
     function restartGame() {
@@ -303,20 +319,21 @@
         isGameOver = false;
         player.angle = 0;
         player.radius = player.baseRadius;
-        player.rVelocity = 0; // 重置速度
+        player.radialVelocity = 0; // 重置速度
         player.shieldTime = 0;
         player.magnetTime = 0;
         entities = [];
         particles = [];
         scoreEl.innerText = score;
         msgEl.style.display = 'none';
-        for(let i=0; i<5; i++) entities.push(new Entity('score'));
+        
+        for(let i=0; i<6; i++) entities.push(new Entity('score'));
+        
         loop();
     }
 
     function gameOver() {
         isGameOver = true;
-        shake = 20; // 死亡震动
         msgEl.style.display = 'block';
         msgEl.innerHTML = `GAME OVER<br>Score: ${score}<br><span style="font-size:14px">点击重试</span>`;
         createExplosion(player.x, player.y, player.color);
@@ -326,51 +343,52 @@
     function update() {
         if (isGameOver) return;
 
-        // --- 1. 新的物理逻辑 ---
-        player.angle += player.rotSpeed;
-
-        if (isPressing) {
-            // 按下：施加向外的力
-            // 越往外推力越小，防止飞出宇宙
-            let forceFactor = 1 - (player.radius / (player.leapLimit + 100)); 
-            player.rVelocity += player.accelOut * forceFactor;
-        } else {
-            // 松开：施加向内的重力
-            // 越往外重力稍微大一点点
-            player.rVelocity -= player.gravity;
-        }
-
-        // 空气阻力/摩擦力 (模拟惯性)
-        player.rVelocity *= player.drag;
-
-        // 更新半径
-        player.radius += player.rVelocity;
-
-        // 边界处理 - 底部 (内圈)
-        if (player.radius < player.baseRadius) {
-            player.radius = player.baseRadius;
-            // 触底反弹：保留一点点反向速度，产生"duang"的质感
-            if (player.rVelocity < -1) {
-                player.rVelocity = -player.rVelocity * 0.3; 
-            } else {
-                player.rVelocity = 0;
-            }
-        }
+        // --- 核心物理引擎逻辑 START ---
         
-        // 边界处理 - 顶部 (外圈软限制)
-        // 允许稍微冲出去一点，然后被强力拉回来
-        if (player.radius > player.leapLimit) {
-             player.rVelocity -= 0.8; // 额外的顶部重力
+        // 1. 角速度更新 (保持匀速)
+        player.angle += player.speed;
+
+        // 2. 径向物理 (弹簧阻尼系统)
+        let targetR = isPressing ? player.leapRadius : player.baseRadius;
+        
+        // 这里的逻辑不再是直接改变半径，而是改变“力”
+        let force = 0;
+        if (isPressing) {
+            // 向外推的力 + 靠近目标的弹力
+            force = (targetR - player.radius) * PHYSICS.springStrength + PHYSICS.pressForce; 
+        } else {
+            // 向内拉的力 (重力) + 靠近内圈的弹力
+            // 减弱回弹力度，制造“滞空”感
+            force = (targetR - player.radius) * (PHYSICS.springStrength * 0.5) - PHYSICS.gravity; 
         }
 
-        // 计算坐标
+        // 应用力到速度
+        player.radialVelocity += force;
+        
+        // 应用空气阻力 (这会让球慢慢停下来，而不是永远晃动)
+        player.radialVelocity *= PHYSICS.drag;
+
+        // 应用速度到位置
+        player.radius += player.radialVelocity;
+
+        // 边界限制 (防止飞出屏幕太远或穿模)
+        if (player.radius < player.baseRadius - 10) {
+            player.radius = player.baseRadius - 10;
+            player.radialVelocity *= -0.5; // 触底反弹一点点
+        }
+        if (player.radius > player.leapRadius + 50) {
+            player.radius = player.leapRadius + 50;
+            player.radialVelocity *= -0.1;
+        }
+
+        // --- 核心物理引擎逻辑 END ---
+
+
         player.x = centerX + Math.cos(player.angle) * player.radius;
         player.y = centerY + Math.sin(player.angle) * player.radius;
 
-        // 拖尾
         player.trail.push({x: player.x, y: player.y});
-        if (player.trail.length > 25) player.trail.shift();
-        // -----------------------
+        if (player.trail.length > 30) player.trail.shift();
 
         if (player.shieldTime > 0) player.shieldTime--;
         if (player.magnetTime > 0) player.magnetTime--;
@@ -380,20 +398,16 @@
 
         spawnEntity();
 
-        // 碰撞检测
         for (let i = entities.length - 1; i >= 0; i--) {
             let e = entities[i];
-            let sucked = e.update();
+            let sucked = e.update(); 
             let pos = e.getPos();
 
             if (checkCollision(player.x, player.y, player.size, pos.x, pos.y, e.size) || sucked) {
+                
                 if (e.type === 'score') {
                     score++;
                     scoreEl.innerText = score;
-                    // 得分时文字跳动
-                    scoreEl.style.transform = "translate(-50%, -50%) scale(1.2)";
-                    setTimeout(()=> scoreEl.style.transform = "translate(-50%, -50%) scale(1)", 100);
-                    
                     createExplosion(pos.x, pos.y, 'white');
                     entities.splice(i, 1);
                 } 
@@ -410,7 +424,6 @@
                 else if (e.type === 'enemy') {
                     if (player.shieldTime > 0) {
                         createExplosion(pos.x, pos.y, 'red');
-                        shake = 5; // 撞击震动
                         entities.splice(i, 1);
                         score += 5; 
                         scoreEl.innerText = score;
@@ -426,25 +439,12 @@
             particles[i].update();
             if (particles[i].life <= 0) particles.splice(i, 1);
         }
-
-        // 屏幕震动衰减
-        if (shake > 0) shake *= 0.9;
-        if (shake < 0.5) shake = 0;
     }
 
     function draw() {
-        // 应用震动
-        ctx.save();
-        if (shake > 0) {
-            let dx = (Math.random() - 0.5) * shake;
-            let dy = (Math.random() - 0.5) * shake;
-            ctx.translate(dx, dy);
-        }
-
         ctx.fillStyle = '#222';
-        ctx.fillRect(0, 0, width, height); // 这里清除整个画布，不需要考虑shake带来的边缘问题，因为背景是纯色
+        ctx.fillRect(0, 0, width, height);
 
-        // 中心支点
         ctx.beginPath();
         ctx.arc(centerX, centerY, 30, 0, Math.PI * 2);
         ctx.fillStyle = '#333';
@@ -453,32 +453,22 @@
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        // 轨道线
         ctx.beginPath();
         ctx.arc(centerX, centerY, player.baseRadius, 0, Math.PI*2);
-        ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+        ctx.strokeStyle = 'rgba(255,255,255,0.05)';
         ctx.stroke();
         
-        ctx.beginPath(); // 极限高度线
-        ctx.arc(centerX, centerY, player.leapLimit, 0, Math.PI*2);
-        ctx.strokeStyle = 'rgba(255,255,255,0.03)';
-        ctx.stroke();
-
-        if (isGameOver && particles.length > 0) {
-             particles.forEach(p => p.draw(ctx));
-             ctx.restore();
-             return;
-        }
-
-        // 绳子 (弹力感)
+        // 绘制绳子
         ctx.beginPath();
         ctx.moveTo(centerX, centerY);
         ctx.lineTo(player.x, player.y);
-        ctx.strokeStyle = 'rgba(0, 210, 255, 0.2)';
-        ctx.lineWidth = 1.5;
+        // 绳子颜色随张力变化
+        let tension = (player.radius - player.baseRadius) / (player.leapRadius - player.baseRadius);
+        tension = Math.max(0, Math.min(1, tension));
+        ctx.strokeStyle = `rgba(${255 * tension}, ${210 - 100*tension}, 255, ${0.2 + tension * 0.3})`;
+        ctx.lineWidth = 2;
         ctx.stroke();
 
-        // 拖尾
         if (player.trail.length > 1) {
             ctx.beginPath();
             ctx.moveTo(player.trail[0].x, player.trail[0].y);
@@ -491,32 +481,32 @@
             ctx.stroke();
         }
 
-        // 玩家本体
         ctx.beginPath();
         ctx.arc(player.x, player.y, player.size, 0, Math.PI * 2);
         ctx.fillStyle = player.color;
         ctx.fill();
 
-        // 道具特效
         if (player.shieldTime > 0) {
             ctx.beginPath();
-            ctx.arc(player.x, player.y, player.size + 8, 0, Math.PI * 2);
+            ctx.arc(player.x, player.y, player.size + 10, 0, Math.PI * 2);
             ctx.strokeStyle = `rgba(0, 255, 0, ${0.5 + Math.sin(Date.now()/100)*0.3})`;
             ctx.lineWidth = 3;
             ctx.stroke();
         }
         if (player.magnetTime > 0) {
             ctx.beginPath();
-            ctx.arc(player.x, player.y, player.size + 20, 0, Math.PI * 2);
-            ctx.strokeStyle = `rgba(191, 0, 255, 0.15)`;
-            ctx.lineWidth = 1;
+            ctx.arc(player.x, player.y, player.size + 25, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(191, 0, 255, 0.15)`; 
             ctx.stroke();
+        }
+
+        if (isGameOver && particles.length > 0) {
+             particles.forEach(p => p.draw(ctx));
+             return;
         }
 
         entities.forEach(e => e.draw(ctx));
         particles.forEach(p => p.draw(ctx));
-
-        ctx.restore();
     }
 
     function loop() {
