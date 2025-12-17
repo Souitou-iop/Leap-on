@@ -3,18 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Leap Orbit</title>
+    <title>Leap Orbit v4 - 无限宇宙版</title>
     <style>
         body {
             margin: 0;
             overflow: hidden;
-            background-color: #222;
+            background-color: #1a1a1a;
             font-family: 'Arial', sans-serif;
             touch-action: none;
         }
-        canvas {
-            display: block;
-        }
+        canvas { display: block; }
+        
         #ui-layer {
             position: absolute;
             top: 50%;
@@ -27,69 +26,76 @@
         }
         #score {
             font-size: 80px;
-            font-weight: bold;
+            font-weight: 900;
             opacity: 0.3;
-            text-shadow: 0 0 10px rgba(255,255,255,0.5);
-            transition: transform 0.1s;
-        }
-        #start-msg {
-            font-size: 16px;
-            margin-top: 15px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            background: rgba(0,0,0,0.6);
-            padding: 15px 30px;
-            border-radius: 30px;
-            backdrop-filter: blur(5px);
-            border: 1px solid rgba(255,255,255,0.1);
+            text-shadow: 0 0 20px rgba(255,255,255,0.2);
+            font-variant-numeric: tabular-nums;
         }
         #game-title {
-            font-size: 24px;
+            font-size: 28px;
             font-weight: bold;
-            margin-bottom: 5px;
             color: #00d2ff;
+            text-shadow: 0 0 10px rgba(0, 210, 255, 0.5);
         }
-        #version-tag {
-            font-size: 12px;
-            color: #888;
-            margin-bottom: 10px;
-            display: block;
+        #version-tag { font-size: 12px; color: #666; display:block; margin-bottom:10px;}
+        #start-msg {
+            background: rgba(0,0,0,0.7);
+            padding: 20px 40px;
+            border-radius: 40px;
+            border: 1px solid rgba(255,255,255,0.1);
+            backdrop-filter: blur(5px);
         }
-        #buff-bar {
+        
+        /* 道具栏 UI */
+        #buff-container {
             position: absolute;
             top: 20px;
             left: 20px;
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 8px;
             pointer-events: none;
         }
-        .buff-item {
-            color: white;
-            font-size: 14px;
-            font-weight: bold;
+        .buff-row {
             display: flex;
             align-items: center;
+            color: white;
+            font-weight: bold;
+            font-size: 14px;
             opacity: 0;
             transition: opacity 0.3s;
+            text-shadow: 0 0 2px black;
         }
-        .buff-icon {
-            width: 20px;
-            height: 20px;
+        .buff-dot {
+            width: 12px;
+            height: 12px;
             border-radius: 50%;
-            margin-right: 8px;
+            margin-right: 10px;
             box-shadow: 0 0 5px currentColor;
+        }
+        /* 简单的高度计 */
+        #altimeter {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            color: rgba(255,255,255,0.5);
+            font-family: monospace;
+            font-size: 14px;
+            pointer-events: none;
         }
     </style>
 </head>
 <body>
 
-<div id="buff-bar">
-    <div id="buff-shield" class="buff-item" style="color:#00ff00">
-        <div class="buff-icon" style="background:#00ff00"></div> 护盾 ACTIVE
+<div id="buff-container">
+    <div id="ui-mega" class="buff-row" style="color:#ffd700">
+        <div class="buff-dot" style="background:#ffd700"></div> 巨化无敌
     </div>
-    <div id="buff-magnet" class="buff-item" style="color:#bf00ff">
-        <div class="buff-icon" style="background:#bf00ff"></div> 磁铁 ACTIVE
+    <div id="ui-slow" class="buff-row" style="color:#00ffff">
+        <div class="buff-dot" style="background:#00ffff"></div> 时空减速
+    </div>
+    <div id="ui-magnet" class="buff-row" style="color:#bf00ff">
+        <div class="buff-dot" style="background:#bf00ff"></div> 强力磁铁
     </div>
 </div>
 
@@ -97,57 +103,67 @@
     <div id="score">0</div>
     <div id="start-msg">
         <div id="game-title">LEAP ORBIT</div>
-        <span id="version-tag">Loading...</span>
-        长按跳跃 / 体验惯性<br>
-        <div style="margin-top:10px; font-size:12px; color:#aaa">
-            🟢护盾 🟣磁铁 ⚪得分
+        <span id="version-tag">v4.0 Infinite</span>
+        <div>按住蓄力 / 松开回落</div>
+        <div style="font-size:12px; color:#aaa; margin-top:10px;">
+            🟠弹射 🟡巨化 🔵减速 🟣磁铁
         </div>
     </div>
 </div>
 
+<div id="altimeter">ALT: 0m</div>
+
 <canvas id="gameCanvas"></canvas>
 
 <script>
-    // --- 游戏配置区域 ---
-    const GAME_VERSION = "v3.1"; // 修改这里来更新版本号
-    // ------------------
-
+    const GAME_VERSION = "v4.0";
+    
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
     const scoreEl = document.getElementById('score');
     const msgEl = document.getElementById('start-msg');
-    const versionEl = document.getElementById('version-tag');
-    const buffShieldEl = document.getElementById('buff-shield');
-    const buffMagnetEl = document.getElementById('buff-magnet');
-
-    // 初始化版本信息
-    document.title = `Leap Orbit ${GAME_VERSION}`;
-    versionEl.innerText = `Current Version: ${GAME_VERSION}`;
+    const altEl = document.getElementById('altimeter');
+    
+    // UI Elements
+    const uiMega = document.getElementById('ui-mega');
+    const uiSlow = document.getElementById('ui-slow');
+    const uiMagnet = document.getElementById('ui-magnet');
 
     let width, height, centerX, centerY;
     let frameId;
     let score = 0;
     let isGameOver = true;
     let isPressing = false;
+    let cameraScale = 1; // 摄像机缩放比例
 
-    // 玩家物理参数
+    // 游戏全局速度系数 (用于实现慢动作)
+    let globalTimeScale = 1.0; 
+
     const player = {
         angle: 0,
         radius: 60,       
         baseRadius: 60,   
-        leapLimit: 260,   
+        
+        // --- v4.0 物理手感微调 (更重、更稳) ---
         rVelocity: 0,     
-        accelOut: 1.2,    
-        gravity: 0.5,     
-        drag: 0.94,       
+        accelOut: 0.6,    // 降低推力 (原1.2 -> 0.6) 增加操作精度
+        gravity: 0.35,    // 降低重力 (原0.5 -> 0.35) 配合无限高度
+        drag: 0.96,       // 增加阻力 (原0.94 -> 0.96) 防止刹不住车
         rotSpeed: 0.035,
+        // ------------------------------------
+
+        baseSize: 14,
         size: 14,
         color: '#00d2ff',
         x: 0,
         y: 0,
         trail: [],
-        shieldTime: 0,
-        magnetTime: 0
+        
+        // 状态计时器
+        megaTime: 0,   // 巨化
+        slowTime: 0,   // 减速
+        magnetTime: 0, // 磁铁
+        boostCoolDown: 0 // 防止连续触发粒子
     };
 
     let entities = []; 
@@ -167,55 +183,69 @@
 
     function handleStart(e) { isPressing = true; if (isGameOver) restartGame(); }
     function handleEnd(e) { isPressing = false; }
-    window.addEventListener('mousedown', handleStart);
-    window.addEventListener('mouseup', handleEnd);
-    window.addEventListener('touchstart', handleStart, {passive: false});
-    window.addEventListener('touchend', handleEnd, {passive: false});
+    // 绑定事件
+    ['mousedown', 'touchstart'].forEach(evt => window.addEventListener(evt, handleStart, {passive: false}));
+    ['mouseup', 'touchend'].forEach(evt => window.addEventListener(evt, handleEnd, {passive: false}));
 
     function randomRange(min, max) { return Math.random() * (max - min) + min; }
 
+    // 实体类
     class Entity {
         constructor(type) {
             this.type = type; 
             this.angle = randomRange(0, Math.PI * 2);
-            this.dist = randomRange(player.baseRadius + 60, player.leapLimit - 20);
+            
+            // --- 动态生成逻辑 ---
+            // 永远生成在玩家当前的上方或附近，而不是固定的区域
+            // 这样无论飞多高都能遇到东西
+            let spawnBase = Math.max(player.baseRadius + 100, player.radius);
+            this.dist = randomRange(spawnBase + 50, spawnBase + 600);
+            
             this.active = true;
             this.scale = 0;
             this.maxScale = 1;
             
-            if (type === 'score') {
-                this.size = 10;
-                this.color = '#ffffff';
-            } else if (type === 'enemy') {
-                this.size = 16;
-                this.color = '#000000';
-                this.rotation = 0;
-                this.moveSpeed = randomRange(-0.005, 0.005);
-            } else if (type === 'shield') {
-                this.size = 14;
-                this.color = '#00ff00';
-            } else if (type === 'magnet') {
-                this.size = 14;
-                this.color = '#bf00ff';
+            // 属性配置
+            switch(type) {
+                case 'score': 
+                    this.size = 10; this.color = '#fff'; break;
+                case 'enemy': 
+                    this.size = 18; this.color = '#000'; this.moveSpeed = randomRange(-0.005, 0.005); break;
+                case 'boost': // 弹射 (橙色)
+                    this.size = 15; this.color = '#ff6600'; break;
+                case 'mega':  // 巨化 (金色)
+                    this.size = 15; this.color = '#ffd700'; break;
+                case 'slow':  // 减速 (青色)
+                    this.size = 15; this.color = '#00ffff'; break;
+                case 'magnet': // 磁铁 (紫色)
+                    this.size = 15; this.color = '#bf00ff'; break;
             }
         }
 
         update() {
             if (this.scale < this.maxScale) this.scale += 0.1;
+
             if (this.type === 'enemy') {
-                this.angle += this.moveSpeed;
-                this.rotation += 0.05;
+                // 敌人的移动受时间流逝影响 (慢动作时变慢)
+                this.angle += this.moveSpeed * globalTimeScale;
             }
+
+            // 磁铁逻辑
             if (this.type === 'score' && player.magnetTime > 0) {
                 let dx = player.x - (centerX + Math.cos(this.angle) * this.dist);
                 let dy = player.y - (centerY + Math.sin(this.angle) * this.dist);
-                if ((dx*dx + dy*dy) < 40000) { 
-                    this.dist += (player.radius - this.dist) * 0.15;
+                let distSq = dx*dx + dy*dy;
+                
+                // 磁铁范围随体型变大而变大
+                let range = player.megaTime > 0 ? 90000 : 40000;
+                
+                if (distSq < range) { 
+                    this.dist += (player.radius - this.dist) * 0.2 * globalTimeScale;
                     let diffAngle = player.angle - this.angle;
                     while (diffAngle > Math.PI) diffAngle -= Math.PI * 2;
                     while (diffAngle < -Math.PI) diffAngle += Math.PI * 2;
-                    this.angle += diffAngle * 0.1;
-                    if((dx*dx + dy*dy) < 2500) return true; 
+                    this.angle += diffAngle * 0.15 * globalTimeScale;
+                    if(distSq < 2500) return true; // 吸入
                 }
             }
             return false;
@@ -231,34 +261,46 @@
             ctx.translate(x, y);
 
             if (this.type === 'enemy') {
-                ctx.rotate(this.rotation);
+                ctx.rotate(Date.now() / 500); // 自转
                 ctx.fillStyle = this.color;
                 ctx.beginPath();
+                // 绘制更尖锐的刺球
                 for(let i=0; i<8; i++) {
                     let rot = Math.PI / 4 * i;
                     ctx.lineTo(Math.cos(rot)*s, Math.sin(rot)*s);
-                    ctx.lineTo(Math.cos(rot + Math.PI/8)*(s/2), Math.sin(rot + Math.PI/8)*(s/2));
+                    ctx.lineTo(Math.cos(rot + Math.PI/8)*(s*0.4), Math.sin(rot + Math.PI/8)*(s*0.4));
                 }
                 ctx.closePath();
                 ctx.fill();
                 ctx.strokeStyle = '#ff3333';
                 ctx.lineWidth = 2;
                 ctx.stroke();
-            } else {
+            } else if (['boost', 'mega', 'slow', 'magnet'].includes(this.type)) {
+                // 道具绘制 (带光环)
                 ctx.fillStyle = this.color;
-                ctx.beginPath();
-                ctx.arc(0, 0, s, 0, Math.PI * 2);
-                ctx.fill();
-                if (this.type !== 'score') {
-                    ctx.strokeStyle = 'white';
-                    ctx.lineWidth = 1;
-                    ctx.stroke();
-                } else {
-                    ctx.shadowBlur = 10;
-                    ctx.shadowColor = "white";
-                    ctx.fill();
-                    ctx.shadowBlur = 0;
-                }
+                ctx.beginPath(); ctx.arc(0,0, s, 0, Math.PI*2); ctx.fill();
+                
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.arc(0,0, s + 4 + Math.sin(Date.now()/200)*2, 0, Math.PI*2); ctx.stroke();
+                
+                // 内部图标 (简单字母)
+                ctx.fillStyle = 'black';
+                ctx.font = 'bold 10px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                let label = '';
+                if(this.type==='boost') label='UP';
+                if(this.type==='mega') label='BIG';
+                if(this.type==='slow') label='TIME';
+                if(this.type==='magnet') label='MAG';
+                ctx.fillText(label, 0, 0);
+
+            } else {
+                // 白球
+                ctx.fillStyle = this.color;
+                ctx.beginPath(); ctx.arc(0,0, s, 0, Math.PI*2); ctx.fill();
+                ctx.shadowBlur = 10; ctx.shadowColor = "white"; ctx.fill(); ctx.shadowBlur = 0;
             }
             ctx.restore();
         }
@@ -271,50 +313,46 @@
     }
 
     class Particle {
-        constructor(x, y, color) {
-            this.x = x;
-            this.y = y;
-            this.color = color;
-            this.vx = (Math.random() - 0.5) * 8;
-            this.vy = (Math.random() - 0.5) * 8;
+        constructor(x, y, color, speed = 1) {
+            this.x = x; this.y = y; this.color = color;
+            this.vx = (Math.random() - 0.5) * 8 * speed;
+            this.vy = (Math.random() - 0.5) * 8 * speed;
             this.life = 1.0;
         }
         update() {
-            this.x += this.vx;
-            this.y += this.vy;
-            this.life -= 0.04;
+            this.x += this.vx * globalTimeScale;
+            this.y += this.vy * globalTimeScale;
+            this.life -= 0.03 * globalTimeScale;
         }
         draw(ctx) {
             ctx.globalAlpha = Math.max(0, this.life);
             ctx.fillStyle = this.color;
-            ctx.beginPath();
-            ctx.arc(this.x, this.y, 4, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.beginPath(); ctx.arc(this.x, this.y, 4, 0, Math.PI*2); ctx.fill();
             ctx.globalAlpha = 1.0;
         }
     }
 
+    // --- 游戏逻辑核心 ---
+
     function spawnEntity() {
-        if (entities.length > 15) return;
+        if (entities.length > 20) return; // 稍微增加同屏上限
+        
         let r = Math.random();
-        if (r < 0.012) entities.push(new Entity('shield')); 
-        else if (r < 0.024) entities.push(new Entity('magnet')); 
-        else if (r < 0.06) {
+        
+        // 道具生成概率 (总共约 5%)
+        if (r < 0.01) entities.push(new Entity('boost'));
+        else if (r < 0.02) entities.push(new Entity('mega')); 
+        else if (r < 0.03) entities.push(new Entity('slow'));
+        else if (r < 0.045) entities.push(new Entity('magnet'));
+        
+        // 敌人生成 (根据分数增加难度)
+        else if (r < 0.10) {
              let enemyCount = entities.filter(e => e.type === 'enemy').length;
-             let maxEnemies = 2 + Math.floor(score / 10); 
+             let maxEnemies = 3 + Math.floor(score / 15); 
              if (enemyCount < maxEnemies) entities.push(new Entity('enemy'));
         }
-        else if (r < 0.12) entities.push(new Entity('score'));
-    }
-
-    function checkCollision(x1, y1, r1, x2, y2, r2) {
-        let dx = x1 - x2;
-        let dy = y1 - y2;
-        return (dx*dx + dy*dy) < (r1+r2)*(r1+r2);
-    }
-
-    function createExplosion(x, y, color) {
-        for(let i=0; i<12; i++) particles.push(new Particle(x, y, color));
+        // 白球
+        else if (r < 0.20) entities.push(new Entity('score'));
     }
 
     function restartGame() {
@@ -323,103 +361,145 @@
         player.angle = 0;
         player.radius = player.baseRadius;
         player.rVelocity = 0;
-        player.shieldTime = 0;
+        player.megaTime = 0;
+        player.slowTime = 0;
         player.magnetTime = 0;
         entities = [];
         particles = [];
         scoreEl.innerText = score;
         msgEl.style.display = 'none';
-        for(let i=0; i<5; i++) entities.push(new Entity('score'));
+        cameraScale = 1;
         loop();
     }
 
-    function gameOver() {
-        isGameOver = true;
-        shake = 20;
-        msgEl.style.display = 'block';
-        // 游戏结束时也显示版本号
-        msgEl.innerHTML = `
-            <div id="game-title">GAME OVER</div>
-            <span id="version-tag">${GAME_VERSION}</span>
-            <div style="font-size:30px; margin: 10px 0;">${score}</div>
-            <div style="font-size:14px; color:#aaa">点击重试</div>
-        `;
-        createExplosion(player.x, player.y, player.color);
-        draw(); 
+    function checkCollision(x1, y1, r1, x2, y2, r2) {
+        let dx = x1 - x2;
+        let dy = y1 - y2;
+        return (dx*dx + dy*dy) < (r1+r2)*(r1+r2);
+    }
+
+    function createExplosion(x, y, color, size = 1) {
+        for(let i=0; i<10 * size; i++) particles.push(new Particle(x, y, color, size));
     }
 
     function update() {
         if (isGameOver) return;
 
-        player.angle += player.rotSpeed;
+        // 1. 处理 Buff 时间与状态
+        if (player.megaTime > 0) player.megaTime--;
+        if (player.magnetTime > 0) player.magnetTime--;
+        
+        // 慢动作逻辑
+        if (player.slowTime > 0) {
+            player.slowTime--;
+            globalTimeScale = 0.5; // 时间流速减半
+        } else {
+            globalTimeScale = 1.0;
+        }
+
+        // 巨化逻辑 (平滑变大变小)
+        let targetSize = (player.megaTime > 0) ? player.baseSize * 2.5 : player.baseSize;
+        player.size += (targetSize - player.size) * 0.1;
+
+        // UI 更新
+        uiMega.style.opacity = player.megaTime > 0 ? 1 : 0;
+        uiSlow.style.opacity = player.slowTime > 0 ? 1 : 0;
+        uiMagnet.style.opacity = player.magnetTime > 0 ? 1 : 0;
+
+        // 2. 玩家物理 (核心修改)
+        // 旋转受慢动作影响
+        player.angle += player.rotSpeed * globalTimeScale;
 
         if (isPressing) {
-            let forceFactor = 1 - (player.radius / (player.leapLimit + 100)); 
-            player.rVelocity += player.accelOut * forceFactor;
+            // 向外推力
+            player.rVelocity += player.accelOut * globalTimeScale;
         } else {
-            player.rVelocity -= player.gravity;
+            // 向内重力
+            player.rVelocity -= player.gravity * globalTimeScale;
         }
 
+        // 阻力
         player.rVelocity *= player.drag;
-        player.radius += player.rVelocity;
+        player.radius += player.rVelocity * globalTimeScale;
 
+        // 内圈反弹
         if (player.radius < player.baseRadius) {
             player.radius = player.baseRadius;
-            if (player.rVelocity < -1) {
-                player.rVelocity = -player.rVelocity * 0.3; 
-            } else {
-                player.rVelocity = 0;
-            }
-        }
-        
-        if (player.radius > player.leapLimit) {
-             player.rVelocity -= 0.8; 
+            player.rVelocity = -player.rVelocity * 0.4; 
         }
 
+        // 计算坐标
         player.x = centerX + Math.cos(player.angle) * player.radius;
         player.y = centerY + Math.sin(player.angle) * player.radius;
 
+        // 拖尾
         player.trail.push({x: player.x, y: player.y});
-        if (player.trail.length > 25) player.trail.shift();
+        if (player.trail.length > 30) player.trail.shift();
 
-        if (player.shieldTime > 0) player.shieldTime--;
-        if (player.magnetTime > 0) player.magnetTime--;
-        
-        buffShieldEl.style.opacity = player.shieldTime > 0 ? 1 : 0;
-        buffMagnetEl.style.opacity = player.magnetTime > 0 ? 1 : 0;
+        // 3. 摄像机缩放逻辑 (无限高度的核心)
+        // 当半径超过 250 时开始缩小，最小缩放到 0.3 倍
+        let targetScale = 1;
+        if (player.radius > 250) {
+            targetScale = 450 / (player.radius + 200); 
+        }
+        // 平滑摄像机
+        cameraScale += (targetScale - cameraScale) * 0.05;
 
+        // 更新高度计 UI
+        altEl.innerText = `ALT: ${Math.floor(player.radius - player.baseRadius)}m`;
+
+        // 4. 实体逻辑
         spawnEntity();
 
+        // 检查过远的实体并移除 (优化性能)
+        // 只有当实体离中心太远 且 离玩家也远时才移除
         for (let i = entities.length - 1; i >= 0; i--) {
             let e = entities[i];
+            
+            // 如果实体离圆心距离 比 玩家离圆心距离 大很多，或者太小
+            let diff = e.dist - player.radius;
+            if (diff < -600 || diff > 1000) { // 动态清理范围
+                entities.splice(i, 1);
+                continue;
+            }
+
             let sucked = e.update();
             let pos = e.getPos();
 
+            // 碰撞检测
             if (checkCollision(player.x, player.y, player.size, pos.x, pos.y, e.size) || sucked) {
+                // 通用消除逻辑
+                entities.splice(i, 1);
+
                 if (e.type === 'score') {
                     score++;
                     scoreEl.innerText = score;
-                    scoreEl.style.transform = "translate(-50%, -50%) scale(1.2)";
-                    setTimeout(()=> scoreEl.style.transform = "translate(-50%, -50%) scale(1)", 100);
                     createExplosion(pos.x, pos.y, 'white');
-                    entities.splice(i, 1);
                 } 
-                else if (e.type === 'shield') {
-                    player.shieldTime = 300; 
-                    createExplosion(pos.x, pos.y, '#00ff00');
-                    entities.splice(i, 1);
+                else if (e.type === 'boost') {
+                    player.rVelocity += 25; // 瞬间加速
+                    createExplosion(pos.x, pos.y, '#ff6600', 2);
+                    shake = 10;
+                }
+                else if (e.type === 'mega') {
+                    player.megaTime = 600; // 10秒
+                    createExplosion(pos.x, pos.y, '#ffd700', 2);
+                    shake = 10;
+                }
+                else if (e.type === 'slow') {
+                    player.slowTime = 400; // 约6-7秒
+                    createExplosion(pos.x, pos.y, '#00ffff', 2);
                 }
                 else if (e.type === 'magnet') {
-                    player.magnetTime = 480; 
+                    player.magnetTime = 600; 
                     createExplosion(pos.x, pos.y, '#bf00ff');
-                    entities.splice(i, 1);
                 }
                 else if (e.type === 'enemy') {
-                    if (player.shieldTime > 0) {
-                        createExplosion(pos.x, pos.y, 'red');
-                        shake = 5; 
-                        entities.splice(i, 1);
-                        score += 5; 
+                    // 巨化模式下撞碎敌人
+                    if (player.megaTime > 0) {
+                        createExplosion(pos.x, pos.y, 'red', 1.5);
+                        shake = 5;
+                        score += 5;
                         scoreEl.innerText = score;
                     } else {
                         gameOver();
@@ -429,6 +509,7 @@
             }
         }
 
+        // 粒子
         for (let i = particles.length - 1; i >= 0; i--) {
             particles[i].update();
             if (particles[i].life <= 0) particles.splice(i, 1);
@@ -438,17 +519,35 @@
         if (shake < 0.5) shake = 0;
     }
 
+    function gameOver() {
+        isGameOver = true;
+        shake = 30;
+        msgEl.style.display = 'block';
+        msgEl.innerHTML = `<div id="game-title">GAME OVER</div><div>${score} 分</div><div style="font-size:14px;color:#888;margin-top:5px">点击重试</div>`;
+        createExplosion(player.x, player.y, player.color, 2);
+        draw();
+    }
+
     function draw() {
-        ctx.save();
-        if (shake > 0) {
-            let dx = (Math.random() - 0.5) * shake;
-            let dy = (Math.random() - 0.5) * shake;
-            ctx.translate(dx, dy);
+        // 1. 背景处理 (随慢动作变色)
+        if (player.slowTime > 0) {
+            ctx.fillStyle = `rgba(0, 40, 40, 1)`; // 慢动作时背景偏青
+        } else {
+            ctx.fillStyle = '#1a1a1a';
         }
+        ctx.fillRect(0, 0, width, height);
 
-        ctx.fillStyle = '#222';
-        ctx.fillRect(0, 0, width, height); 
+        // 应用震动
+        let dx = (shake > 0) ? (Math.random() - 0.5) * shake : 0;
+        let dy = (shake > 0) ? (Math.random() - 0.5) * shake : 0;
 
+        // --- 摄像机变换开始 ---
+        ctx.save();
+        ctx.translate(centerX + dx, centerY + dy);
+        ctx.scale(cameraScale, cameraScale); // 缩放核心
+        ctx.translate(-centerX, -centerY);
+
+        // 绘制中心点
         ctx.beginPath();
         ctx.arc(centerX, centerY, 30, 0, Math.PI * 2);
         ctx.fillStyle = '#333';
@@ -457,14 +556,16 @@
         ctx.lineWidth = 2;
         ctx.stroke();
 
+        // 绘制几圈参考线，增加速度感和深度感
+        ctx.strokeStyle = 'rgba(255,255,255,0.02)';
+        ctx.beginPath(); ctx.arc(centerX, centerY, 200, 0, Math.PI*2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(centerX, centerY, 500, 0, Math.PI*2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(centerX, centerY, 1000, 0, Math.PI*2); ctx.stroke();
+        
+        // 内圈安全线
         ctx.beginPath();
         ctx.arc(centerX, centerY, player.baseRadius, 0, Math.PI*2);
-        ctx.strokeStyle = 'rgba(255,255,255,0.03)';
-        ctx.stroke();
-        
-        ctx.beginPath(); 
-        ctx.arc(centerX, centerY, player.leapLimit, 0, Math.PI*2);
-        ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+        ctx.strokeStyle = 'rgba(255,255,255,0.05)';
         ctx.stroke();
 
         if (isGameOver && particles.length > 0) {
@@ -473,59 +574,60 @@
              return;
         }
 
+        // 绳子
         ctx.beginPath();
         ctx.moveTo(centerX, centerY);
         ctx.lineTo(player.x, player.y);
-        ctx.strokeStyle = 'rgba(0, 210, 255, 0.2)';
-        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = 'rgba(0, 210, 255, 0.15)';
+        ctx.lineWidth = 2;
         ctx.stroke();
 
+        // 拖尾
         if (player.trail.length > 1) {
             ctx.beginPath();
             ctx.moveTo(player.trail[0].x, player.trail[0].y);
             for (let i = 1; i < player.trail.length; i++) {
                 ctx.lineTo(player.trail[i].x, player.trail[i].y);
             }
-            ctx.strokeStyle = player.color;
+            ctx.strokeStyle = player.megaTime > 0 ? '#ffd700' : player.color;
             ctx.lineWidth = player.size;
             ctx.lineCap = 'round';
             ctx.stroke();
         }
 
+        // 玩家 (巨化时有光环)
         ctx.beginPath();
         ctx.arc(player.x, player.y, player.size, 0, Math.PI * 2);
-        ctx.fillStyle = player.color;
+        ctx.fillStyle = player.megaTime > 0 ? '#ffd700' : player.color;
         ctx.fill();
-
-        if (player.shieldTime > 0) {
-            ctx.beginPath();
-            ctx.arc(player.x, player.y, player.size + 8, 0, Math.PI * 2);
-            ctx.strokeStyle = `rgba(0, 255, 0, ${0.5 + Math.sin(Date.now()/100)*0.3})`;
-            ctx.lineWidth = 3;
-            ctx.stroke();
+        
+        // 玩家光晕
+        if (player.megaTime > 0) {
+            ctx.strokeStyle = `rgba(255, 215, 0, 0.5)`;
+            ctx.lineWidth = 4;
+            ctx.beginPath(); ctx.arc(player.x, player.y, player.size + 5, 0, Math.PI*2); ctx.stroke();
         }
-        if (player.magnetTime > 0) {
-            ctx.beginPath();
-            ctx.arc(player.x, player.y, player.size + 20, 0, Math.PI * 2);
-            ctx.strokeStyle = `rgba(191, 0, 255, 0.15)`;
-            ctx.lineWidth = 1;
-            ctx.stroke();
+        if (player.slowTime > 0) {
+             // 慢动作时身上有残影
+             ctx.fillStyle = `rgba(0, 255, 255, 0.2)`;
+             ctx.beginPath(); ctx.arc(player.x - player.rVelocity*2, player.y, player.size, 0, Math.PI*2); ctx.fill();
         }
 
+        // 绘制实体
         entities.forEach(e => e.draw(ctx));
         particles.forEach(p => p.draw(ctx));
 
+        // --- 摄像机变换结束 ---
         ctx.restore();
     }
 
     function loop() {
         update();
         draw();
-        if (!isGameOver) {
-            frameId = requestAnimationFrame(loop);
-        }
+        if (!isGameOver) frameId = requestAnimationFrame(loop);
     }
 
+    // Start
     draw();
 
 </script>
